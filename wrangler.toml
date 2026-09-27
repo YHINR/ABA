@@ -1,0 +1,10 @@
+name = "trivia-ivr"
+main = "trivia-worker.js"
+compatibility_date = "2024-01-01"
+
+# יש ליצור את ה-namespace פעם אחת עם הפקודה:
+#   npx wrangler kv namespace create TRIVIA_KV
+# ואז להעתיק לכאן את ה-id שיוחזר
+[[kv_namespaces]]
+binding = "TRIVIA_KV"
+id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
