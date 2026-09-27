@@ -7,4 +7,4 @@ compatibility_date = "2024-01-01"
 # ואז להעתיק לכאן את ה-id שיוחזר
 [[kv_namespaces]]
 binding = "TRIVIA_KV"
-id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+id = "ba75425c712040678e54c58c0eff1d9c"
