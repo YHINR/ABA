@@ -12,7 +12,7 @@
  */
 
 // ============ לערוך פה רק פעם אחת: סוד לכניסה לפאנל הניהול ============
-const ADMIN_SECRET = 'CHANGE_ME_TO_SOMETHING_SECRET';
+const ADMIN_SECRET = 'ABATRIVIA';
 
 // ============ ברירת מחדל להתחלה - אח"כ עורכים הכל דרך /admin ============
 const DEFAULT_ALLOWED_IDS = ['123456789', '987654321'];
