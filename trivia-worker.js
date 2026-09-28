@@ -3,19 +3,20 @@
  * ================================================
  * כתובות:
  *   /            - זה מה שימות המשיח קורא (api_link)
- *   /admin       - פאנל ניהול (עריכת ת"ז, שאלות, וצפייה בתוצאות)
- *   /results     - JSON גולמי עם כל התוצאות
+ *   /admin       - פאנל ניהול (משתתפים, שאלות, תוצאות וייצוא)
  *
- * מרגע שהמערכת רצה פעם אחת, עריכת שאלות/ת"ז נעשית דרך /admin -
- * אין יותר צורך לערוך את הקובץ הזה או לעשות git commit בשביל זה.
- * עורכים את הקובץ הזה רק אם רוצים לשנות את עצם ההתנהגות של המערכת.
+ * עריכת משתתפים ושאלות נעשית כולה דרך /admin - אין יותר צורך
+ * לגעת בקובץ הזה בשביל זה. עורכים את הקובץ רק כדי לשנות את
+ * ההתנהגות הבסיסית של המערכת עצמה.
  */
 
 // ============ לערוך פה רק פעם אחת: סוד לכניסה לפאנל הניהול ============
 const ADMIN_SECRET = 'ABATRIVIA';
 
-// ============ ברירת מחדל להתחלה - אח"כ עורכים הכל דרך /admin ============
-const DEFAULT_ALLOWED_IDS = ['123456789', '987654321'];
+// ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
+const DEFAULT_PARTICIPANTS = [
+    { id: '123456789', lastName: 'ישראלי', firstName: 'ישראל', class: "א'", institution: 'בית ספר לדוגמה' },
+];
 const DEFAULT_QUESTIONS = [
     {
         text: 'מהי בירת ישראל להקשה 1 תל אביב להקשה 2 ירושלים להקשה 3 חיפה',
@@ -35,12 +36,21 @@ async function loadConfig(env) {
     const raw = await env.TRIVIA_KV.get('config');
     if (raw) {
         try {
-            return JSON.parse(raw);
+            const parsed = JSON.parse(raw);
+            // תאימות לאחור: גרסה ישנה שהחזיקה allowedIds בלבד
+            if (!parsed.participants && Array.isArray(parsed.allowedIds)) {
+                parsed.participants = parsed.allowedIds.map((id) => ({
+                    id, lastName: '', firstName: '', class: '', institution: '',
+                }));
+            }
+            if (!Array.isArray(parsed.participants)) parsed.participants = [];
+            if (!Array.isArray(parsed.questions)) parsed.questions = [];
+            return parsed;
         } catch (e) {
-            // אם משהו השתבש בשמירה, נופלים חזרה לברירת המחדל
+            // נופל לברירת מחדל
         }
     }
-    const initial = { allowedIds: DEFAULT_ALLOWED_IDS, questions: DEFAULT_QUESTIONS };
+    const initial = { participants: DEFAULT_PARTICIPANTS, questions: DEFAULT_QUESTIONS };
     await env.TRIVIA_KV.put('config', JSON.stringify(initial));
     return initial;
 }
@@ -99,7 +109,8 @@ async function handleYemot(request, env) {
     }
 
     const cleanId = id.replace(/\D/g, '');
-    if (!config.allowedIds.includes(cleanId)) {
+    const participant = config.participants.find((p) => p.id === cleanId);
+    if (!participant) {
         return plainTextResponse(
             `id_list_message=t-מספר תעודת הזהות שהוקש אינו מזוהה במערכת להתראות&go_to_folder=..`
         );
@@ -120,7 +131,15 @@ async function handleYemot(request, env) {
 
     await env.TRIVIA_KV.put(
         cleanId,
-        JSON.stringify({ id: cleanId, lastUpdated: new Date().toISOString(), answers })
+        JSON.stringify({
+            id: cleanId,
+            lastName: participant.lastName,
+            firstName: participant.firstName,
+            class: participant.class,
+            institution: participant.institution,
+            lastUpdated: new Date().toISOString(),
+            answers,
+        })
     );
 
     const answeredCount = answers.length;
@@ -156,10 +175,10 @@ async function handleAdminSaveConfig(request, env) {
     } catch (e) {
         return jsonResponse({ error: 'invalid json' }, 400);
     }
-    if (!Array.isArray(body.allowedIds) || !Array.isArray(body.questions)) {
+    if (!Array.isArray(body.participants) || !Array.isArray(body.questions)) {
         return jsonResponse({ error: 'invalid structure' }, 400);
     }
-    await saveConfig(env, { allowedIds: body.allowedIds, questions: body.questions });
+    await saveConfig(env, { participants: body.participants, questions: body.questions });
     return jsonResponse({ ok: true });
 }
 
@@ -189,33 +208,37 @@ function adminPageHTML(secret) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ניהול טריוויה</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f4f5f7; margin: 0; padding: 20px; color: #1a1a1a; }
   h1 { font-size: 22px; margin-bottom: 4px; }
   .sub { color: #666; margin-bottom: 20px; font-size: 14px; }
-  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
   .tab { padding: 10px 18px; background: #fff; border-radius: 10px; cursor: pointer; border: 2px solid transparent; font-weight: 600; }
   .tab.active { border-color: #4f46e5; color: #4f46e5; }
   .panel { display: none; }
   .panel.active { display: block; }
   .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-  input[type=text], textarea { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; font-family: inherit; }
-  textarea { resize: vertical; min-height: 50px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  input[type=text], textarea, select { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; font-family: inherit; }
+  textarea { resize: vertical; min-height: 50px; width: 100%; }
   .small { width: 70px; flex: none; }
   button { cursor: pointer; border: none; border-radius: 8px; padding: 8px 14px; font-weight: 600; font-size: 14px; }
   .btn-primary { background: #4f46e5; color: #fff; }
   .btn-danger { background: #fee2e2; color: #b91c1c; }
   .btn-secondary { background: #eee; color: #333; }
-  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
-  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
-  th, td { padding: 10px; text-align: right; border-bottom: 1px solid #eee; font-size: 14px; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; font-size: 13px; }
+  th, td { padding: 8px; text-align: right; border-bottom: 1px solid #eee; }
   th { background: #f0f0f0; }
   .correct { color: #15803d; font-weight: 700; }
   .wrong { color: #b91c1c; font-weight: 700; }
-  .toast { position: fixed; bottom: 20px; left: 20px; background: #1a1a1a; color: #fff; padding: 12px 20px; border-radius: 10px; display: none; }
+  .toast { position: fixed; bottom: 20px; left: 20px; background: #1a1a1a; color: #fff; padding: 12px 20px; border-radius: 10px; display: none; z-index: 999; }
   .qlabel { font-size: 12px; color: #888; margin-bottom: 2px; }
+  .p-input { flex: 1; min-width: 90px; }
+  .link-btn { background: none; color: #4f46e5; padding: 2px; font-weight: 600; text-decoration: underline; }
+  table-wrap { overflow-x: auto; }
 </style>
 </head>
 <body>
@@ -224,17 +247,22 @@ function adminPageHTML(secret) {
 <div class="sub">כל שינוי שנשמר כאן נכנס לתוקף מיד בשיחה הבאה</div>
 
 <div class="tabs">
-  <div class="tab active" data-tab="ids">ת"ז מאושרות</div>
+  <div class="tab active" data-tab="participants">משתתפים</div>
   <div class="tab" data-tab="questions">שאלות</div>
-  <div class="tab" data-tab="results">תוצאות</div>
+  <div class="tab" data-tab="results">תוצאות וייצוא</div>
 </div>
 
-<div id="panel-ids" class="panel active">
+<div id="panel-participants" class="panel active">
   <div class="toolbar">
-    <button class="btn-primary" onclick="addId()">+ ת"ז חדשה</button>
+    <button class="btn-primary" onclick="addParticipant()">+ משתתף חדש</button>
     <button class="btn-secondary" onclick="saveConfig()">שמור שינויים</button>
+    <button class="btn-secondary" onclick="downloadTemplate()">הורד קובץ אקסל לדוגמה</button>
+    <label class="btn-secondary" style="display:inline-block">
+      ייבוא מאקסל (מחליף את כל הרשימה)
+      <input type="file" accept=".xlsx,.xls" onchange="handleFileUpload(event)" style="display:none">
+    </label>
   </div>
-  <div id="ids-list"></div>
+  <div id="participants-list"></div>
 </div>
 
 <div id="panel-questions" class="panel">
@@ -248,18 +276,25 @@ function adminPageHTML(secret) {
 <div id="panel-results" class="panel">
   <div class="toolbar">
     <button class="btn-secondary" onclick="loadResults()">רענן</button>
+    <select id="institution-filter" onchange="renderResultsTable()">
+      <option value="">כל המוסדות</option>
+    </select>
+    <button class="btn-primary" onclick="exportResults()">ייצוא לאקסל</button>
   </div>
+  <div class="table-wrap">
   <table id="results-table">
-    <thead><tr><th>ת"ז</th><th>עודכן לאחרונה</th><th>נכון מתוך</th></tr></thead>
+    <thead><tr><th>ת"ז</th><th>שם משפחה</th><th>שם פרטי</th><th>כיתה</th><th>מוסד</th><th>ציון</th><th>עודכן</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
 const SECRET = ${JSON.stringify(secret)};
-let config = { allowedIds: [], questions: [] };
+let config = { participants: [], questions: [] };
+let resultsData = [];
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
@@ -275,32 +310,88 @@ function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 2500);
+  setTimeout(() => t.style.display = 'none', 3000);
 }
 
 async function loadConfigFromServer() {
   const res = await fetch('/admin/api/config?secret=' + encodeURIComponent(SECRET));
   config = await res.json();
-  renderIds();
+  renderParticipants();
   renderQuestions();
 }
 
-function renderIds() {
-  const el = document.getElementById('ids-list');
+// ---------- משתתפים ----------
+
+function renderParticipants() {
+  const el = document.getElementById('participants-list');
   el.innerHTML = '';
-  config.allowedIds.forEach((id, i) => {
+  const header = document.createElement('div');
+  header.className = 'row';
+  header.style.fontWeight = '700';
+  header.innerHTML = '<div class="p-input">ת"ז</div><div class="p-input">שם משפחה</div><div class="p-input">שם פרטי</div><div class="p-input">כיתה</div><div class="p-input">מוסד</div><div style="width:60px"></div>';
+  el.appendChild(header);
+  config.participants.forEach((p, i) => {
     const row = document.createElement('div');
-    row.className = 'card row';
+    row.className = 'row card';
     row.innerHTML = \`
-      <input type="text" value="\${id}" oninput="config.allowedIds[\${i}] = this.value.replace(/\\\\D/g,'')" maxlength="9">
-      <button class="btn-danger" onclick="removeId(\${i})">מחק</button>
+      <input class="p-input" type="text" value="\${p.id || ''}" maxlength="9" oninput="config.participants[\${i}].id = this.value.replace(/\\\\D/g,'')">
+      <input class="p-input" type="text" value="\${p.lastName || ''}" oninput="config.participants[\${i}].lastName = this.value">
+      <input class="p-input" type="text" value="\${p.firstName || ''}" oninput="config.participants[\${i}].firstName = this.value">
+      <input class="p-input" type="text" value="\${p.class || ''}" oninput="config.participants[\${i}].class = this.value">
+      <input class="p-input" type="text" value="\${p.institution || ''}" oninput="config.participants[\${i}].institution = this.value">
+      <button class="btn-danger" onclick="removeParticipant(\${i})">מחק</button>
     \`;
     el.appendChild(row);
   });
 }
 
-function addId() { config.allowedIds.push(''); renderIds(); }
-function removeId(i) { config.allowedIds.splice(i, 1); renderIds(); }
+function addParticipant() {
+  config.participants.push({ id: '', lastName: '', firstName: '', class: '', institution: '' });
+  renderParticipants();
+}
+function removeParticipant(i) { config.participants.splice(i, 1); renderParticipants(); }
+
+function downloadTemplate() {
+  const wsData = [
+    ['ת.ז.', 'שם משפחה', 'שם פרטי', 'כיתה', 'מוסד'],
+    ['123456789', 'ישראלי', 'ישראל', "א'", 'בית ספר לדוגמה'],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'משתתפים');
+  XLSX.writeFile(wb, 'תבנית_משתתפים.xlsx');
+}
+
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const data = new Uint8Array(e.target.result);
+    const wb = XLSX.read(data, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const newParticipants = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row[0] === undefined || row[0] === '') continue;
+      newParticipants.push({
+        id: String(row[0]).replace(/\\D/g, ''),
+        lastName: row[1] !== undefined ? String(row[1]) : '',
+        firstName: row[2] !== undefined ? String(row[2]) : '',
+        class: row[3] !== undefined ? String(row[3]) : '',
+        institution: row[4] !== undefined ? String(row[4]) : '',
+      });
+    }
+    config.participants = newParticipants;
+    renderParticipants();
+    showToast('יובאו ' + newParticipants.length + ' משתתפים - לא לשכוח ללחוץ שמור שינויים');
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = '';
+}
+
+// ---------- שאלות ----------
 
 function renderQuestions() {
   const el = document.getElementById('questions-list');
@@ -343,18 +434,84 @@ async function saveConfig() {
   else showToast('שגיאה בשמירה');
 }
 
+// ---------- תוצאות ----------
+
 async function loadResults() {
   const res = await fetch('/admin/api/results?secret=' + encodeURIComponent(SECRET));
   const data = await res.json();
+  resultsData = Object.values(data);
+
+  const select = document.getElementById('institution-filter');
+  const current = select.value;
+  const institutions = [...new Set(resultsData.map(r => r.institution).filter(Boolean))].sort();
+  select.innerHTML = '<option value="">כל המוסדות</option>' +
+    institutions.map(inst => \`<option value="\${inst}">\${inst}</option>\`).join('');
+  select.value = current;
+
+  renderResultsTable();
+}
+
+function filteredSortedResults() {
+  const filter = document.getElementById('institution-filter').value;
+  let rows = resultsData;
+  if (filter) rows = rows.filter(r => r.institution === filter);
+  rows = rows.slice().sort((a, b) => {
+    const c = (a.class || '').localeCompare(b.class || '', 'he');
+    if (c !== 0) return c;
+    return (a.lastName || '').localeCompare(b.lastName || '', 'he');
+  });
+  return rows;
+}
+
+function renderResultsTable() {
   const tbody = document.querySelector('#results-table tbody');
   tbody.innerHTML = '';
-  Object.values(data).forEach(entry => {
+  filteredSortedResults().forEach(entry => {
     const correctCount = (entry.answers || []).filter(a => a.correct).length;
     const total = (entry.answers || []).length;
     const tr = document.createElement('tr');
-    tr.innerHTML = \`<td>\${entry.id}</td><td>\${new Date(entry.lastUpdated).toLocaleString('he-IL')}</td><td>\${correctCount} / \${total}</td>\`;
+    tr.innerHTML = \`
+      <td>\${entry.id}</td>
+      <td>\${entry.lastName || ''}</td>
+      <td>\${entry.firstName || ''}</td>
+      <td>\${entry.class || ''}</td>
+      <td>\${entry.institution || ''}</td>
+      <td>\${correctCount} / \${total}</td>
+      <td>\${entry.lastUpdated ? new Date(entry.lastUpdated).toLocaleString('he-IL') : ''}</td>
+      <td><button class="link-btn" onclick='showDetails(\${JSON.stringify(entry).replace(/'/g, "&apos;")})'>פרטים</button></td>
+    \`;
     tbody.appendChild(tr);
   });
+}
+
+function showDetails(entry) {
+  const lines = (entry.answers || []).map((a, i) =>
+    'שאלה ' + (i + 1) + ': הוקש ' + a.answerGiven + ' - ' + (a.correct ? 'נכון' : 'לא נכון')
+  );
+  alert((entry.firstName || '') + ' ' + (entry.lastName || '') + '\\n' + lines.join('\\n'));
+}
+
+function exportResults() {
+  const qCount = config.questions.length;
+  const header = ['ת.ז.', 'שם משפחה', 'שם פרטי', 'כיתה', 'מוסד', 'ציון'];
+  for (let i = 0; i < qCount; i++) {
+    header.push('שאלה ' + (i + 1) + ' - תשובה', 'שאלה ' + (i + 1) + ' - נכון');
+  }
+  const rows = [header];
+  filteredSortedResults().forEach(entry => {
+    const correctCount = (entry.answers || []).filter(a => a.correct).length;
+    const total = (entry.answers || []).length;
+    const row = [entry.id, entry.lastName || '', entry.firstName || '', entry.class || '', entry.institution || '', correctCount + '/' + total];
+    for (let i = 0; i < qCount; i++) {
+      const a = (entry.answers || []).find(x => x.questionIndex === i);
+      row.push(a ? a.answerGiven : '', a ? (a.correct ? 'כן' : 'לא') : '');
+    }
+    rows.push(row);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'תוצאות');
+  XLSX.writeFile(wb, 'תוצאות_טריוויה.xlsx');
 }
 
 loadConfigFromServer();
