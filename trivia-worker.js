@@ -15,12 +15,12 @@ const ADMIN_SECRET = 'ABATRIVIA';
 
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
-    { id: '216516435', lastName: 'ישראלי', firstName: 'ישראל', class: 'א\'', institution: 'בית ספר לדוגמה' },
+    { id: '123456789', lastName: 'ישראלי', firstName: 'ישראל', class: "א'", institution: 'בית ספר לדוגמה' },
 ];
 const DEFAULT_QUESTIONS = [
     {
-        text: 'מה קורה?\nהקש 1 ל: בסדר.\nהקש 2: לא טוב.\nהקש 3: ל-טוב\nהקש 4: ל-סבבה',
-        validKeys: '12345',
+        text: 'מהי בירת ישראל להקשה 1 תל אביב להקשה 2 ירושלים להקשה 3 חיפה',
+        validKeys: '123',
         correct: '2',
     },
     {
@@ -59,6 +59,71 @@ async function saveConfig(env, config) {
     await env.TRIVIA_KV.put('config', JSON.stringify(config));
 }
 
+// ---------- לוג בגיטהב (בנוסף ללוג ב-KV, לא משנה אותו) ----------
+// כל אירוע נשמר כקובץ נפרד בתיקיית logs בענף נפרד (ברירת מחדל: logs).
+// דורש: GITHUB_REPO ב-wrangler.toml, ו-GITHUB_TOKEN כ-secret.
+
+function toBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin);
+}
+
+function githubRequest(env, method, path, body) {
+    return fetch(`https://api.github.com/repos/${env.GITHUB_REPO}${path}`, {
+        method,
+        headers: {
+            Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'trivia-ivr-worker',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+}
+
+async function ensureLogBranch(env, branch) {
+    const base = env.GITHUB_BASE_BRANCH || 'main';
+    const ref = await githubRequest(env, 'GET', `/git/ref/heads/${base}`);
+    if (!ref.ok) return;
+    const data = await ref.json();
+    await githubRequest(env, 'POST', '/git/refs', { ref: `refs/heads/${branch}`, sha: data.object.sha });
+}
+
+async function writeGithubLog(env, event) {
+    if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) return;
+    try {
+        const branch = env.GITHUB_LOG_BRANCH || 'logs';
+        const stamp = event.time.replace(/[:.]/g, '-');
+        const rand = Math.random().toString(36).slice(2, 6);
+        const path = `logs/${stamp}_${event.id || 'unknown'}_${rand}.json`;
+        const body = {
+            message: `log ${event.type} ${event.id || ''}`.trim(),
+            content: toBase64(JSON.stringify(event, null, 2)),
+            branch,
+        };
+        let branchChecked = false;
+        for (let attempt = 0; attempt < 4; attempt++) {
+            const res = await githubRequest(env, 'PUT', `/contents/${path}`, body);
+            if (res.ok) return;
+            if ((res.status === 404 || res.status === 422) && !branchChecked) {
+                branchChecked = true;
+                await ensureLogBranch(env, branch);
+                continue;
+            }
+            if (res.status === 409) {
+                await new Promise((r) => setTimeout(r, 300 + Math.random() * 700));
+                continue;
+            }
+            return;
+        }
+    } catch (e) {
+        // תקלה בלוג גיטהב אף פעם לא מפילה את השיחה
+    }
+}
+
 function checkSecret(url) {
     return url.searchParams.get('secret') === ADMIN_SECRET;
 }
@@ -95,7 +160,7 @@ function plainTextResponse(body) {
     return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 }
 
-async function handleYemot(request, env) {
+async function handleYemot(request, env, ctx) {
     const url = new URL(request.url);
     const params = url.searchParams;
     const config = await loadConfig(env);
@@ -111,6 +176,7 @@ async function handleYemot(request, env) {
     const cleanId = id.replace(/\D/g, '');
     const participant = config.participants.find((p) => p.id === cleanId);
     if (!participant) {
+        ctx.waitUntil(writeGithubLog(env, { time: new Date().toISOString(), type: 'unknown_id', id: cleanId }));
         return plainTextResponse(
             `id_list_message=t-מספר תעודת הזהות שהוקש אינו מזוהה במערכת להתראות&go_to_folder=..`
         );
@@ -143,6 +209,20 @@ async function handleYemot(request, env) {
     );
 
     const answeredCount = answers.length;
+
+    // לוג נוסף בגיטהב (בנוסף לשמירה ב-KV למעלה)
+    ctx.waitUntil(writeGithubLog(env, {
+        time: new Date().toISOString(),
+        type: answeredCount === 0 ? 'login' : answeredCount < config.questions.length ? 'progress' : 'finished',
+        id: cleanId,
+        lastName: participant.lastName,
+        firstName: participant.firstName,
+        class: participant.class,
+        institution: participant.institution,
+        answers,
+        correctCount: answers.filter((a) => a.correct).length,
+        totalQuestions: config.questions.length,
+    }));
 
     if (answeredCount < config.questions.length) {
         const nextQuestion = config.questions[answeredCount];
@@ -532,7 +612,7 @@ async function handleAdminPage(request) {
 // ---------- ניתוב ----------
 
 export default {
-    async fetch(request, env) {
+    async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
         if (url.pathname === '/admin') return handleAdminPage(request);
@@ -541,6 +621,6 @@ export default {
         if (url.pathname === '/admin/api/results') return handleAdminResults(request, env);
         if (url.pathname === '/results') return handleAdminResults(request, env); // תאימות לאחור
 
-        return handleYemot(request, env);
+        return handleYemot(request, env, ctx);
     },
 };
