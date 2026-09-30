@@ -19,7 +19,7 @@ const ADMIN_SECRET = 'ABATRIVIA';
 const USE_CODE_LISTS = true;
 
 // מספר גרסה - מופיע בכתובת /version כדי לוודא איזה קוד רץ עכשיו
-const VERSION = '4';
+const VERSION = '5';
 
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
@@ -160,12 +160,26 @@ function sanitizeTTS(text) {
         .trim();
 }
 
+function buildMessage(text) {
+    const parts = String(text).split(/\[M?(\d+)\]/i);
+    const out = [];
+    parts.forEach((part, i) => {
+        if (i % 2 === 1) {
+            out.push(`m-${part}`);
+        } else {
+            const t = sanitizeTTS(part);
+            if (t) out.push(`t-${t}`);
+        }
+    });
+    return out.join('.');
+}
+
 function buildRead(name, ttsMessage, { max, min, sayAs = 'NO', allowedDigits = '' }) {
     const params = [
         name, '', String(max), String(min), '7', sayAs, '', '', '',
         allowedDigits, '1', 'Ok', 'timeout', '', 'no',
     ].join(',');
-    return `read=t-${sanitizeTTS(ttsMessage)}=${params}`;
+    return `read=${buildMessage(ttsMessage)}=${params}`;
 }
 
 function plainTextResponse(body) {
@@ -190,7 +204,7 @@ async function handleYemot(request, env, ctx) {
 
     if (!id) {
         return plainTextResponse(
-            buildRead('id', 'ברוכים הבאים לטריוויה הטלפונית אנא הקישו את מספר תעודת הזהות שלכם ולאחר מכן הקישו סולמית',
+            buildRead('id', '[M5666]',
                 { max: 9, min: 8, sayAs: 'TeudatZehut' })
         );
     }
@@ -200,7 +214,7 @@ async function handleYemot(request, env, ctx) {
     if (!participant) {
         ctx.waitUntil(writeGithubLog(env, { time: new Date().toISOString(), type: 'unknown_id', id: cleanId }));
         return plainTextResponse(
-            `id_list_message=t-מספר תעודת הזהות שהוקש אינו מזוהה במערכת להתראות&go_to_folder=..`
+            `id_list_message=${buildMessage('מספר תעודת הזהות שהוקש אינו מזוהה במערכת להתראות')}&go_to_folder=..`
         );
     }
 
@@ -255,7 +269,7 @@ async function handleYemot(request, env, ctx) {
 
     const correctCount = answers.filter((a) => a.correct).length;
     return plainTextResponse(
-        `id_list_message=t-סיימתם את הטריוויה ענית נכון על ${correctCount} מתוך ${config.questions.length} שאלות תודה ולהתראות&go_to_folder=..`
+        `id_list_message=${buildMessage(`סיימתם את הטריוויה ענית נכון על ${correctCount} מתוך ${config.questions.length} שאלות תודה ולהתראות`)}&go_to_folder=..`
     );
 }
 
