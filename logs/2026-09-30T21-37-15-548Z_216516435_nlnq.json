@@ -1,0 +1,19 @@
+{
+  "time": "2026-09-30T21:37:15.548Z",
+  "type": "progress",
+  "id": "216516435",
+  "lastName": "ישראלי",
+  "firstName": "ישראל",
+  "class": "א'",
+  "institution": "בית ספר לדוגמה",
+  "answers": [
+    {
+      "questionIndex": 0,
+      "questionText": "מה קורה?\nהקש 1 ל-בסדר.\nהקש 2 ל-לא טוב.\nהקש 3 ל-חמוד.\nהקש 4 ל-לא בסדר.",
+      "answerGiven": "4",
+      "correct": false
+    }
+  ],
+  "correctCount": 0,
+  "totalQuestions": 2
+}
