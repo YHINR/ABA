@@ -1,0 +1,19 @@
+{
+  "time": "2026-09-30T20:51:54.815Z",
+  "type": "progress",
+  "id": "216516435",
+  "lastName": "ישראלי",
+  "firstName": "ישראל",
+  "class": "א'",
+  "institution": "בית ספר לדוגמה",
+  "answers": [
+    {
+      "questionIndex": 0,
+      "questionText": "מהי בירת ישראל להקשה 1 תל אביב להקשה 2 ירושלים להקשה 3 חיפה",
+      "answerGiven": "timeout",
+      "correct": false
+    }
+  ],
+  "correctCount": 0,
+  "totalQuestions": 2
+}
