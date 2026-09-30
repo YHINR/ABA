@@ -36,6 +36,10 @@ const MSG = {
     FINISHED: 1239,
     ALL_CORRECT: 1228,
     NOT_ALL_CORRECT: 1248,
+    REVEAL: 1216,
+    TOTAL_NOW: 1222,
+    TOTAL_END: 1235,
+    DOUBLE: 1236,
     FAIL_RANGE: [1240, 1247],
     SUCCESS_RANGE: [1250, 1266],
 };
@@ -64,6 +68,43 @@ const DEFAULT_QUESTIONS = [
         correct: '1',
     },
 ];
+
+// הגדרות כלליות לכל השאלות (נערך דרך trivia-editor.html). לכל שאלה אפשר לדרוס חלק מהן ב-overrides
+const DEFAULT_SETTINGS = {
+    "points1": 2,
+    "points2": 1,
+    "onlyOnce": false,
+    "revealAnswer": true,
+    "waitSeconds": 15,
+    "dontSayOutcome": false,
+    "order": "by_number",
+    "maxQuestions": 0,
+    "welcome": "trivia",
+    "specialAnswer": true,
+    "successMinPercent": 100,
+    "sayTotal": false,
+    "finishDoublePoints": false,
+    "dontSayEndGame": false
+};
+
+function eff(G, q) { return { ...G, ...(q.overrides || {}) }; }
+
+// סדר השמעה קבוע לכל משתתף (אקראי לפי ת.ז.) כדי שהשאלות לא יתחלפו בין הקשות
+function playOrder(G, n, id) {
+    const idx = Array.from({ length: n }, (_, i) => i);
+    if (G.order === 'by_number_desc') idx.reverse();
+    else if (G.order === 'random') {
+        let s = 0;
+        for (const c of id) s = (s * 31 + c.charCodeAt(0)) >>> 0;
+        for (let i = n - 1; i > 0; i--) {
+            s = (s * 1664525 + 1013904223) >>> 0;
+            const j = s % (i + 1);
+            [idx[i], idx[j]] = [idx[j], idx[i]];
+        }
+    }
+    const max = Number(G.maxQuestions) || 0;
+    return max > 0 ? idx.slice(0, max) : idx;
+}
 
 // ============ קוד המערכת ============
 
@@ -237,18 +278,26 @@ function buildQuestionText(question) {
     return parts.join(' ');
 }
 
-function buildFinish(answers, totalQuestions) {
+function buildFinish(answers, total, G, points, questions) {
     const correctCount = answers.filter((a) => a.correct).length;
-    const allCorrect = correctCount === totalQuestions;
-    const success = totalQuestions > 0 && (correctCount / totalQuestions) * 100 >= SUCCESS_MIN_PERCENT;
+    const allCorrect = correctCount === total;
+    const success = total > 0 && (correctCount / total) * 100 >= (Number(G.successMinPercent) || 0);
     const last = answers[answers.length - 1];
-    const parts = [
-        last ? sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG) : '',
-        sysMsg(MSG.FINISHED),
-        sysMsg(randomBetween(success ? MSG.SUCCESS_RANGE : MSG.FAIL_RANGE)),
-        sysMsg(allCorrect ? MSG.ALL_CORRECT : MSG.NOT_ALL_CORRECT),
-        `ענית נכון על ${correctCount} מתוך ${totalQuestions} שאלות`,
-    ];
+    const parts = [];
+    if (last) {
+        const q = questions[last.qNumber];
+        const E = eff(G, q);
+        if (!E.dontSayOutcome) parts.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
+        if (!last.correct && E.revealAnswer) parts.push(sysMsg(MSG.REVEAL), (q.answers || [])[Number(q.correct) - 1] || '');
+    }
+    if (!G.dontSayEndGame) {
+        parts.push(sysMsg(MSG.FINISHED));
+        if (G.specialAnswer) parts.push(sysMsg(randomBetween(success ? MSG.SUCCESS_RANGE : MSG.FAIL_RANGE)));
+        parts.push(sysMsg(allCorrect ? MSG.ALL_CORRECT : MSG.NOT_ALL_CORRECT));
+        parts.push(`ענית נכון על ${correctCount} מתוך ${total} שאלות`);
+    }
+    if (G.finishDoublePoints) parts.push(sysMsg(MSG.DOUBLE), String(points));
+    else if (G.sayTotal) parts.push(sysMsg(MSG.TOTAL_END), String(points));
     return `id_list_message=${buildMessage(parts.join(' '))}&go_to_folder=..`;
 }
 
@@ -271,10 +320,11 @@ async function handleYemot(request, env, ctx) {
 
     const config = await loadConfig(env);
     const id = params.get('id');
+    const G = { ...DEFAULT_SETTINGS, ...(config.settings || {}) };
 
     if (!id) {
         return plainTextResponse(
-            buildRead('id', sysMsg(MSG.WELCOME) + sysMsg(MSG.ASK_ID),
+            buildRead('id', (G.welcome === 'quiet' ? '' : sysMsg(MSG.WELCOME)) + sysMsg(MSG.ASK_ID),
                 { max: 9, min: 8, sayAs: 'TeudatZehut' })
         );
     }
@@ -288,24 +338,32 @@ async function handleYemot(request, env, ctx) {
         );
     }
 
+    const order = playOrder(G, config.questions.length, cleanId);
+    const total = order.length;
     const answers = [];
-    let timedOut = false;
-    for (let i = 0; i < config.questions.length; i++) {
-        const all = params.getAll(`ans_${i}`);
-        if (!all.length) break;
-        const given = all[all.length - 1];
-        if (given === 'timeout') {
-            timedOut = true;
-            break;
+    let timedOut = false, pending = null, points = 0;
+    for (let pos = 0; pos < total && !pending; pos++) {
+        const q = config.questions[order[pos]];
+        const E = eff(G, q);
+        let done = false;
+        for (let t = 0; t < 2 && !done; t++) {
+            const all = params.getAll(t ? `ans_${pos}_2` : `ans_${pos}`);
+            const given = all[all.length - 1];
+            if (given === undefined || given === 'timeout') {
+                timedOut = given === 'timeout';
+                pending = { pos, t };
+                break;
+            }
+            const ok = given === q.correct;
+            if (ok || t === 1 || E.onlyOnce) {
+                const pts = ok ? Number(t === 0 ? E.points1 : E.points2) || 0 : 0;
+                points += pts;
+                answers.push({ questionIndex: pos, qNumber: order[pos], questionText: q.text, answerGiven: given, correct: ok, attempt: t + 1, points: pts });
+                done = true;
+            }
         }
-        const question = config.questions[i];
-        answers.push({
-            questionIndex: i,
-            questionText: question.text,
-            answerGiven: given,
-            correct: given === question.correct,
-        });
     }
+    if (!pending && G.finishDoublePoints) points *= 2;
 
     await env.TRIVIA_KV.put(
         cleanId,
@@ -316,47 +374,54 @@ async function handleYemot(request, env, ctx) {
             class: participant.class,
             institution: participant.institution,
             lastUpdated: new Date().toISOString(),
+            points,
             answers,
         })
     );
 
-    const answeredCount = answers.length;
-
-    // לוג נוסף בגיטהב (בנוסף לשמירה ב-KV למעלה)
     ctx.waitUntil(writeGithubLog(env, {
         time: new Date().toISOString(),
-        type: timedOut ? 'timeout' : answeredCount === 0 ? 'login' : answeredCount < config.questions.length ? 'progress' : 'finished',
+        type: timedOut ? 'timeout' : answers.length === 0 ? 'login' : pending ? 'progress' : 'finished',
         id: cleanId,
         lastName: participant.lastName,
         firstName: participant.firstName,
         class: participant.class,
         institution: participant.institution,
         answers,
+        points,
         correctCount: answers.filter((a) => a.correct).length,
-        totalQuestions: config.questions.length,
+        totalQuestions: total,
     }));
 
-    if (answeredCount < config.questions.length) {
-        const nextQuestion = config.questions[answeredCount];
-        let message = buildQuestionText(nextQuestion);
-        if (timedOut) {
-            message = sysMsg(MSG.RETRY) + ' ' + message;
-        } else if (answeredCount > 0) {
-            const last = answers[answeredCount - 1];
-            message = sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG) + ' ' + sysMsg(MSG.NEXT_QUESTION) + ' ' + message;
+    if (pending) {
+        const q = config.questions[order[pending.pos]];
+        const E = eff(G, q);
+        const pre = [];
+        if (timedOut) pre.push(sysMsg(MSG.RETRY));
+        else if (pending.t === 1) {
+            if (!E.dontSayOutcome) pre.push(sysMsg(MSG.WRONG));
+            pre.push(sysMsg(MSG.RETRY));
+        } else if (pending.pos > 0) {
+            const last = answers[pending.pos - 1];
+            const pq = config.questions[last.qNumber];
+            const PE = eff(G, pq);
+            if (!PE.dontSayOutcome) pre.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
+            if (!last.correct && PE.revealAnswer) pre.push(sysMsg(MSG.REVEAL), (pq.answers || [])[Number(pq.correct) - 1] || '');
+            if (G.sayTotal) pre.push(sysMsg(MSG.TOTAL_NOW), String(points));
+            pre.push(sysMsg(MSG.NEXT_QUESTION));
         }
         return plainTextResponse(
-            buildRead(`ans_${answeredCount}`, message, {
+            buildRead(pending.t ? `ans_${pending.pos}_2` : `ans_${pending.pos}`, pre.concat(buildQuestionText(q)).join(' '), {
                 max: 1,
                 min: 1,
-                allowedDigits: questionKeys(nextQuestion),
-                wait: QUESTION_WAIT_SECONDS,
+                allowedDigits: questionKeys(q),
+                wait: Number(E.waitSeconds) || QUESTION_WAIT_SECONDS,
                 reEnter: timedOut,
             })
         );
     }
 
-    return plainTextResponse(buildFinish(answers, config.questions.length));
+    return plainTextResponse(buildFinish(answers, total, G, points, config.questions));
 }
 
 // ---------- API לפאנל הניהול ----------
