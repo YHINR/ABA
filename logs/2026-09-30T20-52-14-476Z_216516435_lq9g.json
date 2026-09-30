@@ -1,0 +1,25 @@
+{
+  "time": "2026-09-30T20:52:14.476Z",
+  "type": "finished",
+  "id": "216516435",
+  "lastName": "ישראלי",
+  "firstName": "ישראל",
+  "class": "א'",
+  "institution": "בית ספר לדוגמה",
+  "answers": [
+    {
+      "questionIndex": 0,
+      "questionText": "מהי בירת ישראל להקשה 1 תל אביב להקשה 2 ירושלים להקשה 3 חיפה",
+      "answerGiven": "timeout",
+      "correct": false
+    },
+    {
+      "questionIndex": 1,
+      "questionText": "כמה זה שתיים ועוד שתיים להקשה 1 שלוש להקשה 2 ארבע להקשה 3 חמש",
+      "answerGiven": "timeout",
+      "correct": false
+    }
+  ],
+  "correctCount": 0,
+  "totalQuestions": 2
+}
