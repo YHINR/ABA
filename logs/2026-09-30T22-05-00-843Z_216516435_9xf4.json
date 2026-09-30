@@ -1,0 +1,25 @@
+{
+  "time": "2026-09-30T22:05:00.843Z",
+  "type": "finished",
+  "id": "216516435",
+  "lastName": "ישראלי",
+  "firstName": "ישראל",
+  "class": "א'",
+  "institution": "בית ספר לדוגמה",
+  "answers": [
+    {
+      "questionIndex": 0,
+      "questionText": "מה קורה?",
+      "answerGiven": "3",
+      "correct": true
+    },
+    {
+      "questionIndex": 1,
+      "questionText": "כמה אתה אוהב את חיפה?",
+      "answerGiven": "1",
+      "correct": true
+    }
+  ],
+  "correctCount": 2,
+  "totalQuestions": 2
+}
