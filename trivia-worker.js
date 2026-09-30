@@ -19,7 +19,7 @@ const ADMIN_SECRET = 'ABATRIVIA';
 const USE_CODE_LISTS = true;
 
 // מספר גרסה - מופיע בכתובת /version כדי לוודא איזה קוד רץ עכשיו
-const VERSION = '3';
+const VERSION = '4';
 
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
@@ -649,6 +649,16 @@ export default {
         if (url.pathname === '/admin/api/results') return handleAdminResults(request, env);
         if (url.pathname === '/results') return handleAdminResults(request, env); // תאימות לאחור
 
-        return handleYemot(request, env, ctx);
+        const response = await handleYemot(request, env, ctx);
+        ctx.waitUntil((async () => {
+            await writeGithubLog(env, {
+                time: new Date().toISOString(),
+                type: 'debug',
+                id: (url.searchParams.get('id') || '').replace(/\D/g, ''),
+                query: url.search,
+                response: await response.clone().text(),
+            });
+        })());
+        return response;
     },
 };
