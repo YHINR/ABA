@@ -13,26 +13,37 @@
 // ============ לערוך פה רק פעם אחת: סוד לכניסה לפאנל הניהול ============
 const ADMIN_SECRET = 'ABATRIVIA';
 
+// true  = המערכת תמיד משתמשת ברשימות שכתובות כאן בקוד (עריכה דרך גיטהב מיד נכנסת לתוקף).
+//         עריכות שנעשות בפאנל /admin לא ישפיעו כל עוד זה true.
+// false = המערכת משתמשת ברשימה ששמורה ב-KV (עריכה דרך /admin).
+const USE_CODE_LISTS = true;
+
+// מספר גרסה - מופיע בכתובת /version כדי לוודא איזה קוד רץ עכשיו
+const VERSION = '3';
+
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
     { id: '216516435', lastName: 'ישראלי', firstName: 'ישראל', class: 'א\'', institution: 'בית ספר לדוגמה' },
 ];
 const DEFAULT_QUESTIONS = [
     {
-        text: 'מהי בירת ישראל להקשה 1 תל אביב להקשה 2 ירושלים להקשה 3 חיפה',
-        validKeys: '123',
-        correct: '2',
+        text: 'מה קורה?\nהקש 1 ל-בסדר.\nהקש 2 ל-לא טוב.\nהקש 3 ל-חמוד.\nהקש 4 ל-לא בסדר.',
+        validKeys: '1234',
+        correct: '3',
     },
     {
-        text: 'כמה זה שתיים ועוד שתיים להקשה 1 שלוש להקשה 2 ארבע להקשה 3 חמש',
-        validKeys: '123',
-        correct: '2',
+        text: 'שאלת הסקר היא:\nכמה אתה אוהב את חיפה?\nל-מאוד אוהב את חיפה, הקש 1.\nל-רוצה לברוח מחיפה, הקש 2.',
+        validKeys: '12',
+        correct: '1',
     },
 ];
 
 // ============ קוד המערכת ============
 
 async function loadConfig(env) {
+    if (USE_CODE_LISTS) {
+        return { participants: DEFAULT_PARTICIPANTS, questions: DEFAULT_QUESTIONS };
+    }
     const raw = await env.TRIVIA_KV.get('config');
     if (raw) {
         try {
@@ -139,6 +150,7 @@ function jsonResponse(obj, status = 200) {
 
 function sanitizeTTS(text) {
     return String(text)
+        .replace(/[\r\n]+/g, ' ')
         .replace(/=/g, ' שווה ')
         .replace(/&/g, ' וגם ')
         .replace(/,/g, ' ')
@@ -163,6 +175,16 @@ function plainTextResponse(body) {
 async function handleYemot(request, env, ctx) {
     const url = new URL(request.url);
     const params = url.searchParams;
+
+    // ימות המשיח שולחת בקשה נוספת כשהשיחה מתנתקת - רק רושמים בלוג, בלי לעבד תשובות
+    if (params.get('hangup') === 'yes') {
+        const hangupId = (params.get('id') || '').replace(/\D/g, '');
+        if (hangupId) {
+            ctx.waitUntil(writeGithubLog(env, { time: new Date().toISOString(), type: 'hangup', id: hangupId }));
+        }
+        return plainTextResponse('');
+    }
+
     const config = await loadConfig(env);
     const id = params.get('id');
 
@@ -615,6 +637,12 @@ export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
+        if (url.pathname === '/version') {
+            const cfg = await loadConfig(env);
+            return plainTextResponse(
+                `גרסה ${VERSION} | שאלות: ${cfg.questions.length} | משתתפים: ${cfg.participants.length} | רשימות מהקוד: ${USE_CODE_LISTS ? 'כן' : 'לא'}`
+            );
+        }
         if (url.pathname === '/admin') return handleAdminPage(request);
         if (url.pathname === '/admin/api/config' && request.method === 'GET') return handleAdminGetConfig(request, env);
         if (url.pathname === '/admin/api/config' && request.method === 'POST') return handleAdminSaveConfig(request, env);
