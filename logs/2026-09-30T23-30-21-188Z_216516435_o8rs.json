@@ -1,0 +1,44 @@
+{
+  "time": "2026-09-30T23:30:21.188Z",
+  "type": "finished",
+  "id": "216516435",
+  "lastName": "ישראלי",
+  "firstName": "ישראל",
+  "class": "א'",
+  "institution": "בית ספר לדוגמה",
+  "answers": [
+    {
+      "questionIndex": 0,
+      "qNumber": 0,
+      "questionText": "מה קורה?",
+      "answerGiven": "3",
+      "correct": true,
+      "reported": false,
+      "attempt": 1,
+      "points": 2
+    },
+    {
+      "questionIndex": 1,
+      "qNumber": 1,
+      "questionText": "כמה אתה אוהב את חיפה?",
+      "answerGiven": "1",
+      "correct": true,
+      "reported": false,
+      "attempt": 2,
+      "points": 1
+    },
+    {
+      "questionIndex": 2,
+      "qNumber": 2,
+      "questionText": "עכשיו לילה",
+      "answerGiven": "1",
+      "correct": true,
+      "reported": false,
+      "attempt": 2,
+      "points": 1
+    }
+  ],
+  "points": 4,
+  "correctCount": 3,
+  "totalQuestions": 3
+}
