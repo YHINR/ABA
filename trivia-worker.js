@@ -37,6 +37,7 @@ const MSG = {
     ALL_CORRECT: 1228,
     NOT_ALL_CORRECT: 1248,
     REVEAL: 1216,
+    QNUM: 2970,
     WELCOME_Q: 1204,
     SCORE_UP_TO: 1202,
     POINTS_WORD: 1014,
@@ -76,6 +77,13 @@ const DEFAULT_QUESTIONS = [
         validKeys: '12',
         correct: '1',
     },
+    {
+        text: 'עכשיו לילה',
+        answers: [],
+        validKeys: '10',
+        type: 'tf',
+        correct: '1',
+    },
 ];
 
 // הגדרות כלליות לכל השאלות (נערך דרך trivia-editor.html). לכל שאלה אפשר לדרוס חלק מהן ב-overrides
@@ -99,7 +107,8 @@ const DEFAULT_SETTINGS = {
     "sayScoreIntro": false,
     "allowReport": false,
     "endGoto": "..",
-    "noMorePointsHours": 0
+    "noMorePointsHours": 0,
+    "sayQuestionNumber": true
 };
 
 function eff(G, q) { return { ...G, ...(q.overrides || {}) }; }
@@ -110,13 +119,23 @@ function revealOf(q) {
 }
 
 // סדר השמעה קבוע לכל משתתף (אקראי לפי ת.ז.) כדי שהשאלות לא יתחלפו בין הקשות
-function playOrder(G, n, id) {
-    const idx = Array.from({ length: n }, (_, i) => i);
+// שאלה פעילה: לא כבויה, ובתוך חלון הזמנים (שעון ישראל) אם הוגדר
+function isActive(q, il) {
+    if (q.disabled) return false;
+    if (q.activeFrom && q.activeFrom.replace('T', ' ') > il) return false;
+    if (q.activeUntil && q.activeUntil.replace('T', ' ') < il) return false;
+    return true;
+}
+
+function playOrder(G, questions, id) {
+    const n = questions.length;
+    const il = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jerusalem', dateStyle: 'short', timeStyle: 'short' }).format(new Date());
+    const idx = Array.from({ length: n }, (_, i) => i).filter((i) => isActive(questions[i], il));
     if (G.order === 'by_number_desc') idx.reverse();
     else if (G.order === 'random') {
         let s = 0;
         for (const c of id) s = (s * 31 + c.charCodeAt(0)) >>> 0;
-        for (let i = n - 1; i > 0; i--) {
+        for (let i = idx.length - 1; i > 0; i--) {
             s = (s * 1664525 + 1013904223) >>> 0;
             const j = s % (i + 1);
             [idx[i], idx[j]] = [idx[j], idx[i]];
@@ -362,7 +381,7 @@ async function handleYemot(request, env, ctx) {
         );
     }
 
-    const order = playOrder(G, config.questions.length, cleanId);
+    const order = playOrder(G, config.questions, cleanId);
     const total = order.length;
     const answers = [];
     let timedOut = false, pending = null, points = 0, streak = 0;
@@ -453,7 +472,7 @@ async function handleYemot(request, env, ctx) {
             pre.push(sysMsg(MSG.NEXT_QUESTION));
         }
         return plainTextResponse(
-            buildRead(pending.t ? `ans_${pending.pos}_2` : `ans_${pending.pos}`, pre.concat(buildQuestionText(q)).join(' '), {
+            buildRead(pending.t ? `ans_${pending.pos}_2` : `ans_${pending.pos}`, pre.concat(E.sayQuestionNumber ? [sysMsg(MSG.QNUM), String(pending.pos + 1)] : [], buildQuestionText(q)).join(' '), {
                 max: 1,
                 min: 1,
                 allowedDigits: questionKeys(q) + (G.allowReport ? '9' : ''),
