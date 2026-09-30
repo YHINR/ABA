@@ -13,6 +13,11 @@
 // ============ לערוך פה רק פעם אחת: סוד לכניסה לפאנל הניהול ============
 const ADMIN_SECRET = 'ABATRIVIA';
 
+// true  = המערכת תמיד משתמשת ברשימות שכתובות כאן בקוד (עריכה דרך גיטהב מיד נכנסת לתוקף).
+//         עריכות שנעשות בפאנל /admin לא ישפיעו כל עוד זה true.
+// false = המערכת משתמשת ברשימה ששמורה ב-KV (עריכה דרך /admin).
+const USE_CODE_LISTS = true;
+
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
     { id: '216516435', lastName: 'ישראלי', firstName: 'ישראל', class: 'א\'', institution: 'בית ספר לדוגמה' },
@@ -33,6 +38,9 @@ const DEFAULT_QUESTIONS = [
 // ============ קוד המערכת ============
 
 async function loadConfig(env) {
+    if (USE_CODE_LISTS) {
+        return { participants: DEFAULT_PARTICIPANTS, questions: DEFAULT_QUESTIONS };
+    }
     const raw = await env.TRIVIA_KV.get('config');
     if (raw) {
         try {
@@ -139,6 +147,7 @@ function jsonResponse(obj, status = 200) {
 
 function sanitizeTTS(text) {
     return String(text)
+        .replace(/[\r\n]+/g, ' ')
         .replace(/=/g, ' שווה ')
         .replace(/&/g, ' וגם ')
         .replace(/,/g, ' ')
@@ -163,6 +172,16 @@ function plainTextResponse(body) {
 async function handleYemot(request, env, ctx) {
     const url = new URL(request.url);
     const params = url.searchParams;
+
+    // ימות המשיח שולחת בקשה נוספת כשהשיחה מתנתקת - רק רושמים בלוג, בלי לעבד תשובות
+    if (params.get('hangup') === 'yes') {
+        const hangupId = (params.get('id') || '').replace(/\D/g, '');
+        if (hangupId) {
+            ctx.waitUntil(writeGithubLog(env, { time: new Date().toISOString(), type: 'hangup', id: hangupId }));
+        }
+        return plainTextResponse('');
+    }
+
     const config = await loadConfig(env);
     const id = params.get('id');
 
