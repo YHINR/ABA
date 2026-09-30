@@ -1,0 +1,7 @@
+{
+  "time": "2026-09-30T21:29:09.361Z",
+  "type": "debug",
+  "id": "216516435",
+  "query": "?ApiCallId=f66debae57adee47e22d0b119e61d87456d8cdf9&ApiYFCallId=c3c62c3f-9791-44eb-944b-e8a130aa88ae&ApiDID=0733640724&ApiRealDID=0733640724&ApiPhone=0548548689&ApiExtension=Star/8&ApiTime=1790803723&id=216516435&ans_0=4",
+  "response": "read=t-שאלת הסקר היא: כמה אתה אוהב את חיפה? ל מאוד אוהב את חיפה  הקש 1  ל רוצה לברוח מחיפה  הקש 2=ans_1,,1,1,7,NO,,,,12,1,Ok,timeout,,no"
+}
