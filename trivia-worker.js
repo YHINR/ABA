@@ -18,6 +18,9 @@ const ADMIN_SECRET = 'ABATRIVIA';
 // false = המערכת משתמשת ברשימה ששמורה ב-KV (עריכה דרך /admin).
 const USE_CODE_LISTS = true;
 
+// מספר גרסה - מופיע בכתובת /version כדי לוודא איזה קוד רץ עכשיו
+const VERSION = '3';
+
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
     { id: '216516435', lastName: 'ישראלי', firstName: 'ישראל', class: 'א\'', institution: 'בית ספר לדוגמה' },
@@ -634,6 +637,12 @@ export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
+        if (url.pathname === '/version') {
+            const cfg = await loadConfig(env);
+            return plainTextResponse(
+                `גרסה ${VERSION} | שאלות: ${cfg.questions.length} | משתתפים: ${cfg.participants.length} | רשימות מהקוד: ${USE_CODE_LISTS ? 'כן' : 'לא'}`
+            );
+        }
         if (url.pathname === '/admin') return handleAdminPage(request);
         if (url.pathname === '/admin/api/config' && request.method === 'GET') return handleAdminGetConfig(request, env);
         if (url.pathname === '/admin/api/config' && request.method === 'POST') return handleAdminSaveConfig(request, env);
