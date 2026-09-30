@@ -19,7 +19,32 @@ const ADMIN_SECRET = 'ABATRIVIA';
 const USE_CODE_LISTS = true;
 
 // מספר גרסה - מופיע בכתובת /version כדי לוודא איזה קוד רץ עכשיו
-const VERSION = '5';
+const VERSION = '6';
+
+// הודעות המערכת המוקלטות בימות המשיח (מספר בלי האות M)
+const MSG = {
+    WELCOME: 1203,
+    ASK_ID: 5666,
+    CORRECT: 1200,
+    WRONG: 1210,
+    NEXT_QUESTION: 1206,
+    QUESTION_IS: 1207,
+    PRESS_CORRECT: 1208,
+    TICK: 1209,
+    ANSWER_NUMBERS: [1211, 1212, 1213, 1214],
+    RETRY: 1215,
+    FINISHED: 1239,
+    ALL_CORRECT: 1228,
+    NOT_ALL_CORRECT: 1248,
+    FAIL_RANGE: [1240, 1247],
+    SUCCESS_RANGE: [1250, 1266],
+};
+
+// כמה שניות מחכים להקשה אחרי שהשאלה והתשובות הושמעו
+const QUESTION_WAIT_SECONDS = 15;
+
+// באיזה אחוז הצלחה לפחות נחשב "הצלחה" (להשמעת אחת מהודעות 1250-1266)
+const SUCCESS_MIN_PERCENT = 100;
 
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
@@ -27,12 +52,14 @@ const DEFAULT_PARTICIPANTS = [
 ];
 const DEFAULT_QUESTIONS = [
     {
-        text: 'מה קורה?\nהקש 1 ל-בסדר.\nהקש 2 ל-לא טוב.\nהקש 3 ל-חמוד.\nהקש 4 ל-לא בסדר.',
+        text: 'מה קורה?',
+        answers: ['בסדר', 'לא טוב', 'חמוד', 'לא בסדר'],
         validKeys: '1234',
         correct: '3',
     },
     {
-        text: 'שאלת הסקר היא:\nכמה אתה אוהב את חיפה?\nל-מאוד אוהב את חיפה, הקש 1.\nל-רוצה לברוח מחיפה, הקש 2.',
+        text: 'כמה אתה אוהב את חיפה?',
+        answers: ['מאוד אוהב את חיפה', 'רוצה לברוח מחיפה'],
         validKeys: '12',
         correct: '1',
     },
@@ -174,12 +201,55 @@ function buildMessage(text) {
     return out.join('.');
 }
 
-function buildRead(name, ttsMessage, { max, min, sayAs = 'NO', allowedDigits = '' }) {
+function buildRead(name, ttsMessage, { max, min, sayAs = 'NO', allowedDigits = '', wait = 7, reEnter = false }) {
     const params = [
-        name, '', String(max), String(min), '7', sayAs, '', '', '',
+        name, reEnter ? 'yes' : '', String(max), String(min), String(wait), sayAs, '', '', '',
         allowedDigits, '1', 'Ok', 'timeout', '', 'no',
     ].join(',');
     return `read=${buildMessage(ttsMessage)}=${params}`;
+}
+
+function sysMsg(n) {
+    return `[M${n}]`;
+}
+
+function randomBetween([from, to]) {
+    return from + Math.floor(Math.random() * (to - from + 1));
+}
+
+function questionAnswers(question) {
+    return Array.isArray(question.answers) ? question.answers.slice(0, MSG.ANSWER_NUMBERS.length) : [];
+}
+
+function questionKeys(question) {
+    if (question.validKeys) return question.validKeys;
+    return questionAnswers(question).map((_, i) => String(i + 1)).join('');
+}
+
+function buildQuestionText(question) {
+    const parts = [sysMsg(MSG.QUESTION_IS), question.text];
+    const answers = questionAnswers(question);
+    if (answers.length) {
+        parts.push(sysMsg(MSG.PRESS_CORRECT));
+        answers.forEach((a, i) => parts.push(sysMsg(MSG.ANSWER_NUMBERS[i]), a));
+    }
+    parts.push(sysMsg(MSG.TICK));
+    return parts.join(' ');
+}
+
+function buildFinish(answers, totalQuestions) {
+    const correctCount = answers.filter((a) => a.correct).length;
+    const allCorrect = correctCount === totalQuestions;
+    const success = totalQuestions > 0 && (correctCount / totalQuestions) * 100 >= SUCCESS_MIN_PERCENT;
+    const last = answers[answers.length - 1];
+    const parts = [
+        last ? sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG) : '',
+        sysMsg(MSG.FINISHED),
+        sysMsg(randomBetween(success ? MSG.SUCCESS_RANGE : MSG.FAIL_RANGE)),
+        sysMsg(allCorrect ? MSG.ALL_CORRECT : MSG.NOT_ALL_CORRECT),
+        `ענית נכון על ${correctCount} מתוך ${totalQuestions} שאלות`,
+    ];
+    return `id_list_message=${buildMessage(parts.join(' '))}&go_to_folder=..`;
 }
 
 function plainTextResponse(body) {
@@ -204,7 +274,7 @@ async function handleYemot(request, env, ctx) {
 
     if (!id) {
         return plainTextResponse(
-            buildRead('id', '[M5666]',
+            buildRead('id', sysMsg(MSG.WELCOME) + sysMsg(MSG.ASK_ID),
                 { max: 9, min: 8, sayAs: 'TeudatZehut' })
         );
     }
@@ -219,9 +289,15 @@ async function handleYemot(request, env, ctx) {
     }
 
     const answers = [];
+    let timedOut = false;
     for (let i = 0; i < config.questions.length; i++) {
-        const given = params.get(`ans_${i}`);
-        if (given === null) break;
+        const all = params.getAll(`ans_${i}`);
+        if (!all.length) break;
+        const given = all[all.length - 1];
+        if (given === 'timeout') {
+            timedOut = true;
+            break;
+        }
         const question = config.questions[i];
         answers.push({
             questionIndex: i,
@@ -249,7 +325,7 @@ async function handleYemot(request, env, ctx) {
     // לוג נוסף בגיטהב (בנוסף לשמירה ב-KV למעלה)
     ctx.waitUntil(writeGithubLog(env, {
         time: new Date().toISOString(),
-        type: answeredCount === 0 ? 'login' : answeredCount < config.questions.length ? 'progress' : 'finished',
+        type: timedOut ? 'timeout' : answeredCount === 0 ? 'login' : answeredCount < config.questions.length ? 'progress' : 'finished',
         id: cleanId,
         lastName: participant.lastName,
         firstName: participant.firstName,
@@ -262,15 +338,25 @@ async function handleYemot(request, env, ctx) {
 
     if (answeredCount < config.questions.length) {
         const nextQuestion = config.questions[answeredCount];
+        let message = buildQuestionText(nextQuestion);
+        if (timedOut) {
+            message = sysMsg(MSG.RETRY) + ' ' + message;
+        } else if (answeredCount > 0) {
+            const last = answers[answeredCount - 1];
+            message = sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG) + ' ' + sysMsg(MSG.NEXT_QUESTION) + ' ' + message;
+        }
         return plainTextResponse(
-            buildRead(`ans_${answeredCount}`, nextQuestion.text, { max: 1, min: 1, allowedDigits: nextQuestion.validKeys })
+            buildRead(`ans_${answeredCount}`, message, {
+                max: 1,
+                min: 1,
+                allowedDigits: questionKeys(nextQuestion),
+                wait: QUESTION_WAIT_SECONDS,
+                reEnter: timedOut,
+            })
         );
     }
 
-    const correctCount = answers.filter((a) => a.correct).length;
-    return plainTextResponse(
-        `id_list_message=${buildMessage(`סיימתם את הטריוויה ענית נכון על ${correctCount} מתוך ${config.questions.length} שאלות תודה ולהתראות`)}&go_to_folder=..`
-    );
+    return plainTextResponse(buildFinish(answers, config.questions.length));
 }
 
 // ---------- API לפאנל הניהול ----------
