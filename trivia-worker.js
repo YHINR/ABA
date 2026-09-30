@@ -75,14 +75,14 @@ const DEFAULT_SETTINGS = {
     "points2": 1,
     "onlyOnce": false,
     "revealAnswer": true,
-    "waitSeconds": 15,
+    "waitSeconds": 5,
     "dontSayOutcome": false,
     "order": "by_number",
     "maxQuestions": 0,
     "welcome": "trivia",
     "specialAnswer": true,
     "successMinPercent": 100,
-    "sayTotal": false,
+    "sayTotal": true,
     "finishDoublePoints": false,
     "dontSayEndGame": false
 };
