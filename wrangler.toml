@@ -8,3 +8,10 @@ compatibility_date = "2024-01-01"
 [[kv_namespaces]]
 binding = "TRIVIA_KV"
 id = "ba75425c712040678e54c58c0eff1d9c"
+
+# לוג בגיטהב: יש להחליף את USER/REPO בשם המשתמש ושם הריפו, למשל "moshe/trivia"
+# את הטוקן (GITHUB_TOKEN) מגדירים כ-secret ולא כותבים כאן
+[vars]
+GITHUB_REPO = "USER/REPO"
+GITHUB_LOG_BRANCH = "logs"
+GITHUB_BASE_BRANCH = "main"
