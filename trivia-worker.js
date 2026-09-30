@@ -37,6 +37,15 @@ const MSG = {
     ALL_CORRECT: 1228,
     NOT_ALL_CORRECT: 1248,
     REVEAL: 1216,
+    WELCOME_Q: 1204,
+    SCORE_UP_TO: 1202,
+    POINTS_WORD: 1014,
+    ADDED: 1178,
+    TF: 1218,
+    TRUE: 1221,
+    FALSE: 1220,
+    BLOCKED: 1303,
+    CHEER: 1230,
     TOTAL_NOW: 1222,
     TOTAL_END: 1235,
     DOUBLE: 1236,
@@ -75,19 +84,30 @@ const DEFAULT_SETTINGS = {
     "points2": 1,
     "onlyOnce": false,
     "revealAnswer": true,
-    "waitSeconds": 5,
+    "waitSeconds": 15,
     "dontSayOutcome": false,
     "order": "by_number",
     "maxQuestions": 0,
     "welcome": "trivia",
     "specialAnswer": true,
     "successMinPercent": 100,
-    "sayTotal": true,
+    "sayTotal": false,
     "finishDoublePoints": false,
-    "dontSayEndGame": false
+    "dontSayEndGame": false,
+    "plusAll": false,
+    "sayAddedPoints": false,
+    "sayScoreIntro": false,
+    "allowReport": false,
+    "endGoto": "..",
+    "noMorePointsHours": 0
 };
 
 function eff(G, q) { return { ...G, ...(q.overrides || {}) }; }
+
+function revealOf(q) {
+    if (q.type === 'tf') return [sysMsg(MSG.REVEAL), sysMsg(q.correct === '1' ? MSG.TRUE : MSG.FALSE)];
+    return [sysMsg(MSG.REVEAL), (q.answers || [])[Number(q.correct) - 1] || ''];
+}
 
 // סדר השמעה קבוע לכל משתתף (אקראי לפי ת.ז.) כדי שהשאלות לא יתחלפו בין הקשות
 function playOrder(G, n, id) {
@@ -263,22 +283,24 @@ function questionAnswers(question) {
 }
 
 function questionKeys(question) {
+    if (question.type === 'tf') return '10';
     if (question.validKeys) return question.validKeys;
     return questionAnswers(question).map((_, i) => String(i + 1)).join('');
 }
 
 function buildQuestionText(question) {
     const parts = [sysMsg(MSG.QUESTION_IS), question.text];
-    const answers = questionAnswers(question);
+    const answers = question.type === 'tf' ? [] : questionAnswers(question);
     if (answers.length) {
         parts.push(sysMsg(MSG.PRESS_CORRECT));
         answers.forEach((a, i) => parts.push(sysMsg(MSG.ANSWER_NUMBERS[i]), a));
     }
+    if (question.type === 'tf') parts.push(sysMsg(MSG.TF));
     parts.push(sysMsg(MSG.TICK));
     return parts.join(' ');
 }
 
-function buildFinish(answers, total, G, points, questions) {
+function buildFinish(answers, total, G, points, questions, blocked) {
     const correctCount = answers.filter((a) => a.correct).length;
     const allCorrect = correctCount === total;
     const success = total > 0 && (correctCount / total) * 100 >= (Number(G.successMinPercent) || 0);
@@ -288,7 +310,8 @@ function buildFinish(answers, total, G, points, questions) {
         const q = questions[last.qNumber];
         const E = eff(G, q);
         if (!E.dontSayOutcome) parts.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
-        if (!last.correct && E.revealAnswer) parts.push(sysMsg(MSG.REVEAL), (q.answers || [])[Number(q.correct) - 1] || '');
+        if (!last.correct && !last.reported && E.revealAnswer) parts.push(...revealOf(q));
+        if (G.sayAddedPoints && last.points > 0) parts.push(sysMsg(MSG.ADDED), String(last.points), sysMsg(MSG.POINTS_WORD));
     }
     if (!G.dontSayEndGame) {
         parts.push(sysMsg(MSG.FINISHED));
@@ -296,9 +319,10 @@ function buildFinish(answers, total, G, points, questions) {
         parts.push(sysMsg(allCorrect ? MSG.ALL_CORRECT : MSG.NOT_ALL_CORRECT));
         parts.push(`ענית נכון על ${correctCount} מתוך ${total} שאלות`);
     }
-    if (G.finishDoublePoints) parts.push(sysMsg(MSG.DOUBLE), String(points));
+    if (G.finishDoublePoints) parts.push(sysMsg(MSG.DOUBLE), String(points), sysMsg(MSG.CHEER));
     else if (G.sayTotal) parts.push(sysMsg(MSG.TOTAL_END), String(points));
-    return `id_list_message=${buildMessage(parts.join(' '))}&go_to_folder=..`;
+    if (blocked) parts.push(sysMsg(MSG.BLOCKED));
+    return `id_list_message=${buildMessage(parts.join(' '))}&go_to_folder=${G.endGoto || '..'}`;
 }
 
 function plainTextResponse(body) {
@@ -324,8 +348,8 @@ async function handleYemot(request, env, ctx) {
 
     if (!id) {
         return plainTextResponse(
-            buildRead('id', (G.welcome === 'quiet' ? '' : sysMsg(MSG.WELCOME)) + sysMsg(MSG.ASK_ID),
-                { max: 9, min: 8, sayAs: 'TeudatZehut' })
+            buildRead('id', (G.welcome === 'trivia' ? sysMsg(MSG.WELCOME) : '') + sysMsg(MSG.ASK_ID),
+                { max: 9, min: 8 })
         );
     }
 
@@ -334,14 +358,20 @@ async function handleYemot(request, env, ctx) {
     if (!participant) {
         ctx.waitUntil(writeGithubLog(env, { time: new Date().toISOString(), type: 'unknown_id', id: cleanId }));
         return plainTextResponse(
-            `id_list_message=${buildMessage('מספר תעודת הזהות שהוקש אינו מזוהה במערכת להתראות')}&go_to_folder=..`
+            `id_list_message=${buildMessage('מספר תעודת הזהות שהוקש הוא ' + cleanId.split('').join(' ') + ' והוא אינו מזוהה במערכת להתראות')}&go_to_folder=..`
         );
     }
 
     const order = playOrder(G, config.questions.length, cleanId);
     const total = order.length;
     const answers = [];
-    let timedOut = false, pending = null, points = 0;
+    let timedOut = false, pending = null, points = 0, streak = 0;
+    let prev = {};
+    try { prev = JSON.parse((await env.TRIVIA_KV.get(cleanId)) || 'null') || {}; } catch (e) {}
+    const hasParams = [...params.keys()].some((k) => k.startsWith('ans_'));
+    const hours = Number(G.noMorePointsHours) || 0;
+    const blocked = hasParams ? !!prev.blocked : !!(prev.blockedUntil && Date.now() < prev.blockedUntil);
+    const blockedUntil = hasParams || blocked ? prev.blockedUntil || 0 : hours ? Date.now() + hours * 3600000 : 0;
     for (let pos = 0; pos < total && !pending; pos++) {
         const q = config.questions[order[pos]];
         const E = eff(G, q);
@@ -354,11 +384,16 @@ async function handleYemot(request, env, ctx) {
                 pending = { pos, t };
                 break;
             }
-            const ok = given === q.correct;
-            if (ok || t === 1 || E.onlyOnce) {
-                const pts = ok ? Number(t === 0 ? E.points1 : E.points2) || 0 : 0;
+            const reported = given === '9' && !!G.allowReport;
+            const ok = !reported && given === q.correct;
+            if (ok || reported || t === 1 || E.onlyOnce) {
+                let pts = 0;
+                if (ok && t === 0) { streak++; pts = (Number(E.points1) || 0) * (G.plusAll ? streak : 1); }
+                else if (ok) { streak = 0; pts = Number(E.points2) || 0; }
+                else streak = 0;
+                if (blocked) pts = 0;
                 points += pts;
-                answers.push({ questionIndex: pos, qNumber: order[pos], questionText: q.text, answerGiven: given, correct: ok, attempt: t + 1, points: pts });
+                answers.push({ questionIndex: pos, qNumber: order[pos], questionText: q.text, answerGiven: given, correct: ok, reported, attempt: t + 1, points: pts });
                 done = true;
             }
         }
@@ -375,6 +410,8 @@ async function handleYemot(request, env, ctx) {
             institution: participant.institution,
             lastUpdated: new Date().toISOString(),
             points,
+            blocked,
+            blockedUntil,
             answers,
         })
     );
@@ -397,6 +434,10 @@ async function handleYemot(request, env, ctx) {
         const q = config.questions[order[pending.pos]];
         const E = eff(G, q);
         const pre = [];
+        if (pending.pos === 0 && pending.t === 0 && !timedOut) {
+            if (G.welcome === 'questions') pre.push(sysMsg(MSG.WELCOME_Q));
+            if (G.sayScoreIntro && Number(E.points1)) pre.push(sysMsg(MSG.SCORE_UP_TO), String(E.points1), sysMsg(MSG.POINTS_WORD));
+        }
         if (timedOut) pre.push(sysMsg(MSG.RETRY));
         else if (pending.t === 1) {
             if (!E.dontSayOutcome) pre.push(sysMsg(MSG.WRONG));
@@ -406,7 +447,8 @@ async function handleYemot(request, env, ctx) {
             const pq = config.questions[last.qNumber];
             const PE = eff(G, pq);
             if (!PE.dontSayOutcome) pre.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
-            if (!last.correct && PE.revealAnswer) pre.push(sysMsg(MSG.REVEAL), (pq.answers || [])[Number(pq.correct) - 1] || '');
+            if (PE.sayAddedPoints && last.points > 0) pre.push(sysMsg(MSG.ADDED), String(last.points), sysMsg(MSG.POINTS_WORD));
+            if (!last.correct && !last.reported && PE.revealAnswer) pre.push(...revealOf(pq));
             if (G.sayTotal) pre.push(sysMsg(MSG.TOTAL_NOW), String(points));
             pre.push(sysMsg(MSG.NEXT_QUESTION));
         }
@@ -414,14 +456,14 @@ async function handleYemot(request, env, ctx) {
             buildRead(pending.t ? `ans_${pending.pos}_2` : `ans_${pending.pos}`, pre.concat(buildQuestionText(q)).join(' '), {
                 max: 1,
                 min: 1,
-                allowedDigits: questionKeys(q),
+                allowedDigits: questionKeys(q) + (G.allowReport ? '9' : ''),
                 wait: Number(E.waitSeconds) || QUESTION_WAIT_SECONDS,
                 reEnter: timedOut,
             })
         );
     }
 
-    return plainTextResponse(buildFinish(answers, total, G, points, config.questions));
+    return plainTextResponse(buildFinish(answers, total, G, points, config.questions, blocked));
 }
 
 // ---------- API לפאנל הניהול ----------
