@@ -15,7 +15,7 @@ const ADMIN_SECRET = 'ABATRIVIA';
 
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
-    { id: '123456789', lastName: 'ישראלי', firstName: 'ישראל', class: "א'", institution: 'בית ספר לדוגמה' },
+    { id: '216516435', lastName: 'ישראלי', firstName: 'ישראל', class: 'א\'', institution: 'בית ספר לדוגמה' },
 ];
 const DEFAULT_QUESTIONS = [
     {
