@@ -15,12 +15,12 @@ const ADMIN_SECRET = 'ABATRIVIA';
 
 // ============ ברירת מחדל להתחלה - אח"כ הכל מנוהל דרך /admin ============
 const DEFAULT_PARTICIPANTS = [
-    { id: '123456789', lastName: 'ישראלי', firstName: 'ישראל', class: "א'", institution: 'בית ספר לדוגמה' },
+    { id: '216516435', lastName: 'ישראלי', firstName: 'ישראל', class: 'א\'', institution: 'בית ספר לדוגמה' },
 ];
 const DEFAULT_QUESTIONS = [
     {
-        text: 'מהי בירת ישראל להקשה 1 תל אביב להקשה 2 ירושלים להקשה 3 חיפה',
-        validKeys: '123',
+        text: 'מה קורה?\nהקש 1 ל: בסדר.\nהקש 2: לא טוב.\nהקש 3: ל-טוב\nהקש 4: ל-סבבה',
+        validKeys: '12345',
         correct: '2',
     },
     {
