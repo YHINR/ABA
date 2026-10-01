@@ -78,11 +78,10 @@ const DEFAULT_QUESTIONS = [
         correct: '1',
     },
     {
-        text: 'האם בא לכם?',
-        answers: ['אולי', 'כן', 'לא'],
-        validKeys: '123',
-        type: 'poll',
-        correct: '',
+        text: 'איזה חג היום?',
+        answers: ['פסח', 'פורים', 'סוכות', 'ראש השנה'],
+        validKeys: '1234',
+        correct: '1',
     },
 ];
 
@@ -110,8 +109,17 @@ const DEFAULT_SETTINGS = {
     "noMorePointsHours": 0,
     "sayQuestionNumber": true,
     "tickSeconds": 3,
-    "repeatAttempts": 3
+    "repeatAttempts": 3,
+    "pollPoints": 0,
+    "skipAnswered": false
 };
+
+// מזהה יציב לשאלה (לפי הטקסט) - משמש לזכור על אילו שאלות המשתתף כבר ענה בשיחות קודמות
+function qKey(q) {
+    let h = 5381;
+    for (const c of String(q.text || '')) h = ((h * 33) ^ c.codePointAt(0)) >>> 0;
+    return h.toString(36);
+}
 
 function eff(G, q) { return { ...G, ...(q.overrides || {}) }; }
 
@@ -321,20 +329,21 @@ function buildQuestionText(question, ticks = 1) {
     return parts.join(' ');
 }
 
-function buildFinish(answers, total, G, points, questions, blocked) {
+function buildFinish(answers, total, G, points, questions, blocked, skipMsgs = []) {
     const graded = total - answers.filter((a) => a.poll).length;
     const correctCount = answers.filter((a) => a.correct).length;
     const allCorrect = correctCount === graded;
     const success = graded > 0 && (correctCount / graded) * 100 >= (Number(G.successMinPercent) || 0);
     const last = answers[answers.length - 1];
     const parts = [];
-    if (last && !last.poll) {
+    if (last) {
         const q = questions[last.qNumber];
         const E = eff(G, q);
-        if (!E.dontSayOutcome) parts.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
-        if (!last.correct && !last.reported && E.revealAnswer) parts.push(...revealOf(q));
+        if (!last.poll && !E.dontSayOutcome) parts.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
+        if (!last.correct && !last.reported && !last.poll && E.revealAnswer) parts.push(...revealOf(q));
         if (G.sayAddedPoints && last.points > 0) parts.push(sysMsg(MSG.ADDED), String(last.points), sysMsg(MSG.POINTS_WORD));
     }
+    parts.push(...skipMsgs);
     if (!G.dontSayEndGame) {
         parts.push(sysMsg(MSG.FINISHED));
         if (graded > 0 && G.specialAnswer) parts.push(sysMsg(randomBetween(success ? MSG.SUCCESS_RANGE : MSG.FAIL_RANGE)));
@@ -384,7 +393,6 @@ async function handleYemot(request, env, ctx) {
     }
 
     const order = playOrder(G, config.questions, cleanId);
-    const total = order.length;
     const answers = [];
     let timedOut = false, pending = null, points = 0, streak = 0;
     let prev = {};
@@ -393,8 +401,17 @@ async function handleYemot(request, env, ctx) {
     const hours = Number(G.noMorePointsHours) || 0;
     const blocked = hasParams ? !!prev.blocked : !!(prev.blockedUntil && Date.now() < prev.blockedUntil);
     const blockedUntil = hasParams || blocked ? prev.blockedUntil || 0 : hours ? Date.now() + hours * 3600000 : 0;
-    for (let pos = 0; pos < total && !pending; pos++) {
+
+    // שאלות שכבר נענו בשיחות קודמות: הרשימה נקבעת בתחילת השיחה ונשארת קבועה עד סופה
+    const skipSet = new Set(hasParams ? prev.skip || [] : prev.seen || []);
+    const seenNow = new Set(prev.seen || []);
+    const skipAt = (p) => { const sq = config.questions[order[p]]; return !!eff(G, sq).skipAnswered && skipSet.has(qKey(sq)); };
+    const total = order.filter((_, p) => !skipAt(p)).length;
+    let skippedSince = [];
+
+    for (let pos = 0; pos < order.length && !pending; pos++) {
         const q = config.questions[order[pos]];
+        if (skipAt(pos)) { skippedSince.push(pos); continue; }
         const E = eff(G, q);
         let done = false;
         for (let t = 0; t < 2 && !done; t++) {
@@ -405,6 +422,7 @@ async function handleYemot(request, env, ctx) {
                 pending = { pos, t };
                 break;
             }
+            seenNow.add(qKey(q));
             const reported = given === '9' && !!G.allowReport;
             const poll = q.type === 'poll';
             const ok = !reported && !poll && given === q.correct;
@@ -412,14 +430,17 @@ async function handleYemot(request, env, ctx) {
                 let pts = 0;
                 if (ok && t === 0) { streak++; pts = (Number(E.points1) || 0) * (G.plusAll ? streak : 1); }
                 else if (ok) { streak = 0; pts = Number(E.points2) || 0; }
-                else if (!poll) streak = 0;
+                else if (poll) pts = Number(E.pollPoints) || 0;
+                else streak = 0;
                 if (blocked) pts = 0;
                 points += pts;
-                answers.push({ questionIndex: pos, qNumber: order[pos], questionText: q.text, answerGiven: given, correct: ok, poll, reported, attempt: t + 1, points: pts });
+                answers.push({ questionIndex: answers.length, qNumber: order[pos], questionText: q.text, answerGiven: given, correct: ok, poll, reported, attempt: t + 1, points: pts });
                 done = true;
+                skippedSince = [];
             }
         }
     }
+    const skipMsgs = skippedSince.flatMap((p) => [sysMsg(MSG.QNUM), String(p + 1), 'כבר עניתם לשאלה זו']);
     if (!pending && G.finishDoublePoints) points *= 2;
 
     await env.TRIVIA_KV.put(
@@ -434,6 +455,8 @@ async function handleYemot(request, env, ctx) {
             points,
             blocked,
             blockedUntil,
+            seen: [...seenNow],
+            skip: [...skipSet],
             answers,
         })
     );
@@ -458,22 +481,24 @@ async function handleYemot(request, env, ctx) {
         // צליל השעון קצר - חוזרים עליו עד שמסתיים זמן ההמתנה, וההקשה מתקבלת גם בזמן ההשמעה
         const ticks = Math.max(1, Math.ceil((Number(E.waitSeconds) || QUESTION_WAIT_SECONDS) / (Number(G.tickSeconds) || 3)));
         const pre = [];
-        if (pending.pos === 0 && pending.t === 0 && !timedOut) {
+        if (answers.length === 0 && pending.t === 0 && !timedOut) {
             if (G.welcome === 'questions') pre.push(sysMsg(MSG.WELCOME_Q));
             if (G.sayScoreIntro && Number(E.points1)) pre.push(sysMsg(MSG.SCORE_UP_TO), String(E.points1), sysMsg(MSG.POINTS_WORD));
+            pre.push(...skipMsgs);
         }
         if (timedOut) pre.push(sysMsg(MSG.RETRY));
         else if (pending.t === 1) {
             if (!E.dontSayOutcome) pre.push(sysMsg(MSG.WRONG));
             pre.push(sysMsg(MSG.RETRY));
-        } else if (pending.pos > 0) {
-            const last = answers[pending.pos - 1];
+        } else if (answers.length > 0) {
+            const last = answers[answers.length - 1];
             const pq = config.questions[last.qNumber];
             const PE = eff(G, pq);
             if (!last.poll && !PE.dontSayOutcome) pre.push(sysMsg(last.correct ? MSG.CORRECT : MSG.WRONG));
             if (PE.sayAddedPoints && last.points > 0) pre.push(sysMsg(MSG.ADDED), String(last.points), sysMsg(MSG.POINTS_WORD));
             if (!last.correct && !last.reported && !last.poll && PE.revealAnswer) pre.push(...revealOf(pq));
             if (G.sayTotal) pre.push(sysMsg(MSG.TOTAL_NOW), String(points));
+            pre.push(...skipMsgs);
             pre.push(sysMsg(MSG.NEXT_QUESTION));
         }
         return plainTextResponse(
@@ -488,7 +513,7 @@ async function handleYemot(request, env, ctx) {
         );
     }
 
-    return plainTextResponse(buildFinish(answers, total, G, points, config.questions, blocked));
+    return plainTextResponse(buildFinish(answers, total, G, points, config.questions, blocked, skipMsgs));
 }
 
 // ---------- API לפאנל הניהול ----------
