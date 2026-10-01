@@ -1,0 +1,7 @@
+{
+  "time": "2026-10-01T14:22:21.857Z",
+  "type": "debug",
+  "id": "216516435",
+  "query": "?ApiCallId=184607f52b98a3e4917789ad59b7fafba4e257dc&ApiYFCallId=2db48dc3-e800-4a4f-88e8-75d36c48b4c6&ApiDID=0733640724&ApiRealDID=0733640724&ApiPhone=0548548689&ApiExtension=Star/8&ApiTime=1790864271&id=216516435&ans_0=3&ans_1=2&ans_1_2=1&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout&ans_2=timeout",
+  "response": "read=m-1215.m-2970.t-3.m-1207.t-איזה חג היום?.m-1208.m-1211.t-פסח.m-1212.t-פורים.m-1213.t-סוכות.m-1214.t-ראש השנה.m-1209.m-1209.m-1209.m-1209.m-1209=ans_2,yes,1,1,3,NO,,,,1234,3,Ok,timeout,,no"
+}
