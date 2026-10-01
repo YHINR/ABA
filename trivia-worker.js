@@ -29,7 +29,7 @@ const MSG = {
     WRONG: 1210,
     NEXT_QUESTION: 1206,
     QUESTION_IS: 1207,
-    PRESS_CORRECT: 1208,
+    PRESS_CORRECT: 2971,
     TICK: 1209,
     ANSWER_NUMBERS: [1211, 1212, 1213, 1214],
     RETRY: 1215,
@@ -75,12 +75,6 @@ const DEFAULT_QUESTIONS = [
         text: 'כמה אתה אוהב את חיפה?',
         answers: ['מאוד אוהב את חיפה', 'רוצה לברוח מחיפה'],
         validKeys: '12',
-        correct: '1',
-    },
-    {
-        text: 'איזה חג היום?',
-        answers: ['פסח', 'פורים', 'סוכות', 'ראש השנה'],
-        validKeys: '1234',
         correct: '1',
     },
 ];
@@ -321,8 +315,8 @@ function buildQuestionText(question, ticks = 1) {
     const parts = [sysMsg(MSG.QUESTION_IS), question.text];
     const answers = question.type === 'tf' ? [] : questionAnswers(question);
     if (answers.length) {
-        parts.push(question.type === 'poll' ? 'הקישו את מספר התשובה שבחרתם' : sysMsg(MSG.PRESS_CORRECT));
         answers.forEach((a, i) => parts.push(sysMsg(MSG.ANSWER_NUMBERS[i]), a));
+        parts.push(question.type === 'poll' ? 'הקישו את מספר התשובה שבחרתם' : sysMsg(MSG.PRESS_CORRECT));
     }
     if (question.type === 'tf') parts.push(sysMsg(MSG.TF));
     for (let i = 0; i < ticks; i++) parts.push(sysMsg(MSG.TICK));
@@ -486,7 +480,8 @@ async function handleYemot(request, env, ctx) {
             if (G.sayScoreIntro && Number(E.points1)) pre.push(sysMsg(MSG.SCORE_UP_TO), String(E.points1), sysMsg(MSG.POINTS_WORD));
             pre.push(...skipMsgs);
         }
-        if (timedOut) pre.push(sysMsg(MSG.RETRY));
+        // לא הוקשה תשובה: חוזרים על השאלה בלי שום הודעה לפניה
+        if (timedOut) { /* בכוונה ריק */ }
         else if (pending.t === 1) {
             if (!E.dontSayOutcome) pre.push(sysMsg(MSG.WRONG));
             pre.push(sysMsg(MSG.RETRY));
