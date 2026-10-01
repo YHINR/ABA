@@ -1,0 +1,25 @@
+{
+  "time": "2026-10-01T14:24:10.906Z",
+  "type": "progress",
+  "id": "216516435",
+  "lastName": "ישראלי",
+  "firstName": "ישראל",
+  "class": "א'",
+  "institution": "בית ספר לדוגמה",
+  "answers": [
+    {
+      "questionIndex": 0,
+      "qNumber": 0,
+      "questionText": "מה קורה?",
+      "answerGiven": "1",
+      "correct": false,
+      "poll": false,
+      "reported": false,
+      "attempt": 2,
+      "points": 0
+    }
+  ],
+  "points": 0,
+  "correctCount": 0,
+  "totalQuestions": 3
+}
